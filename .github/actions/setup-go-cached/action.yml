@@ -1,0 +1,30 @@
+name: Set up Go with per-target caches
+description: >-
+  Installs Go from go.mod and restores the module and build caches under a
+  key per target (each target compiles against different system headers).
+  The build cache is saved again after every run so it stays warm.
+inputs:
+  key:
+    description: Cache namespace, e.g. the target id
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+        cache: false
+    - id: paths
+      shell: bash
+      run: |
+        echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ${{ steps.paths.outputs.mod }}
+          ${{ steps.paths.outputs.build }}
+        key: go-${{ inputs.key }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+        restore-keys: |
+          go-${{ inputs.key }}-${{ hashFiles('go.sum') }}-
+          go-${{ inputs.key }}-

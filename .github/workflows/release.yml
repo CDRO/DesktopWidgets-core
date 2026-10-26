@@ -39,7 +39,7 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
       release: ${{ steps.tag.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: tag
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -77,47 +77,101 @@ jobs:
     if: needs.tag.outputs.release == 'true'
     runs-on: ubuntu-24.04
     outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
       widgets: ${{ steps.plan.outputs.widgets }}
-      has_builds: ${{ steps.plan.outputs.has_builds }}
+      matrix_host: ${{ steps.plan.outputs.matrix_host }}
+      matrix_container: ${{ steps.plan.outputs.matrix_container }}
+      images: ${{ steps.plan.outputs.images }}
+      has_host: ${{ steps.plan.outputs.has_host }}
+      has_container: ${{ steps.plan.outputs.has_container }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.tag.outputs.tag }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - id: plan
         run: >-
           go run ./tools/dwb plan --github-output
+          --registry "ghcr.io/${GITHUB_REPOSITORY}/build"
           --previous "https://github.com/$RELEASE_REPO/releases/latest/download/catalog.json"
           ${{ inputs.all && '--all' || '' }}
 
-  build:
+  images:
+    needs: plan
+    if: needs.plan.outputs.has_container == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-images.yml
+    with:
+      images: ${{ needs.plan.outputs.images }}
+
+  # Linux targets: run inside the prebuilt image, dependencies included.
+  build-container:
+    needs: [tag, plan, images]
+    name: build (${{ matrix.target }})
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_container) }}
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+      options: ${{ matrix.options }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - uses: ./.github/actions/setup-go-cached
+        with:
+          key: ${{ matrix.target }}
+      - name: Build and package
+        shell: bash
+        run: go run ./tools/dwb build --target "${{ matrix.target }}" --widgets "${{ matrix.widgets }}" --out dist
+      - uses: actions/upload-artifact@v6
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            dist/build-*.json
+            dist/dw-*
+          if-no-files-found: error
+
+  # Windows: setup runs on the runner, its tools restored from the cache.
+  build-host:
     needs: [tag, plan]
-    if: needs.plan.outputs.has_builds == 'true'
+    if: needs.plan.outputs.has_host == 'true'
     name: build (${{ matrix.target }})
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_host) }}
     runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.container }}
     steps:
+      - name: Restore build tools
+        if: matrix.cache != ''
+        uses: actions/cache@v6
+        with:
+          path: ${{ matrix.cache }}
+          key: tools-${{ matrix.target }}-${{ matrix.cache_key }}
       - name: Prepare build environment
         if: matrix.setup != ''
         shell: bash
         run: ${{ matrix.setup }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.tag.outputs.tag }}
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go-cached
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          key: ${{ matrix.target }}
       - name: Build and package
         shell: bash
         run: go run ./tools/dwb build --target "${{ matrix.target }}" --widgets "${{ matrix.widgets }}" --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-${{ matrix.target }}
           path: |
@@ -126,19 +180,25 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [tag, plan, build]
-    if: always() && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    needs: [tag, plan, images, build-host, build-container]
+    # Skipped is fine (nothing to build), failed is not: a failed images job
+    # also skips build-container, so it is checked explicitly.
+    if: >-
+      always() && needs.plan.result == 'success' &&
+      contains(fromJSON('["success","skipped"]'), needs.images.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.build-host.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.build-container.result)
     runs-on: ubuntu-24.04
     env:
       TAG: ${{ needs.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.tag.outputs.tag }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: dist-*
           path: dist

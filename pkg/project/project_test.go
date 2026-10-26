@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,5 +82,21 @@ func TestRepositoryPlatforms(t *testing.T) {
 	// The real platforms.yml must always load.
 	if _, targets, err := Load("../.."); err != nil || len(targets) == 0 {
 		t.Fatalf("platforms.yml: %v", err)
+	}
+}
+
+func TestBuildImage(t *testing.T) {
+	a := Target{ID: "debian-12-amd64", Container: "debian:12", Setup: "apt-get install x"}
+	b := a
+	b.Setup = "apt-get install y"
+	ia, ib := a.BuildImage("ghcr.io/CDRO/Repo/build"), b.BuildImage("ghcr.io/CDRO/Repo/build")
+	if ia == ib || !strings.HasPrefix(ia, "ghcr.io/cdro/repo/build:debian-12-amd64-") {
+		t.Fatalf("unexpected images %q %q", ia, ib)
+	}
+	if ia != a.BuildImage("ghcr.io/cdro/repo/build") {
+		t.Fatal("image name must be stable")
+	}
+	if (Target{ID: "windows-amd64"}).BuildImage("r") != "" {
+		t.Fatal("host targets have no image")
 	}
 }
