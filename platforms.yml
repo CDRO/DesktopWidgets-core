@@ -1,0 +1,70 @@
+# Build matrix. Every widget is built for every target unless its widget.yml
+# restricts `platforms`. One CI job runs per expanded target.
+#
+# `matrix` works like GitLab's parallel:matrix: each entry expands to the
+# cartesian product of its variables, and ${VAR} is substituted in all
+# string fields (id, runner, container, setup, formats, depends, ...).
+#
+# Formats: windows -> msi, zip | linux -> tar.gz, deb, rpm, flatpak
+
+targets:
+  - id: windows-amd64
+    os: windows
+    arch: amd64
+    runner: windows-latest
+    # WiX 5 builds the MSI (v6+ has different licensing terms).
+    setup: dotnet tool install --global wix --version 5.0.2 && echo "$USERPROFILE\\.dotnet\\tools" >> "$GITHUB_PATH"
+    formats: [msi, zip]
+
+  # Distro-independent tarball. Built on the oldest supported Ubuntu so the
+  # binary runs on systems with an older glibc.
+  - id: linux-amd64
+    os: linux
+    arch: amd64
+    runner: ubuntu-22.04
+    setup: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+    formats: [tar.gz]
+
+  - id: flatpak-amd64
+    os: linux
+    arch: amd64
+    runner: ubuntu-24.04
+    # Ubuntu 24.04 restricts unprivileged user namespaces, which bubblewrap needs.
+    setup: >-
+      sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 &&
+      sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+    formats: [flatpak]
+    flatpak:
+      runtime: org.gnome.Platform
+      runtimeVersion: "50"
+      sdk: org.gnome.Sdk
+      goExtension: org.freedesktop.Sdk.Extension.golang
+
+  - id: ${DISTRO}-${VERSION}-amd64
+    os: linux
+    arch: amd64
+    distro: ${DISTRO}-${VERSION}
+    runner: ubuntu-24.04
+    container: ${DISTRO}:${VERSION}
+    setup: >-
+      apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y
+      build-essential pkg-config git ca-certificates curl libgtk-3-dev libwebkit2gtk-4.1-dev
+    formats: [deb]
+    depends: ["libgtk-3-0t64 | libgtk-3-0", "libwebkit2gtk-4.1-0"]
+    matrix:
+      - DISTRO: [debian]
+        VERSION: ["12", "13"]
+      - DISTRO: [ubuntu]
+        VERSION: ["24.04"]
+
+  - id: fedora-${VERSION}-amd64
+    os: linux
+    arch: amd64
+    distro: fedora-${VERSION}
+    runner: ubuntu-24.04
+    container: fedora:${VERSION}
+    setup: dnf install -y gcc pkgconf-pkg-config git tar gzip gtk3-devel webkit2gtk4.1-devel
+    formats: [rpm]
+    depends: [gtk3, webkit2gtk4.1]
+    matrix:
+      - VERSION: ["43", "44"]

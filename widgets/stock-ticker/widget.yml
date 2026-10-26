@@ -1,0 +1,37 @@
+id: stock-ticker
+name: Stock Ticker
+description: Live quotes with intraday sparkline for a list of symbols.
+version: 1.0.0
+category: finance
+window:
+  width: 300
+  height: 220
+  transparent: true
+  layer: bottom
+  position: top-right
+settings:
+  - key: symbols
+    type: string
+    label: Symbols
+    description: Comma-separated, e.g. AAPL, MSFT, ^GSPC, BTC-USD
+    default: AAPL, MSFT, ^GSPC
+  - key: source
+    type: enum
+    label: Data source
+    options: [yahoo, finnhub]
+    default: yahoo
+  - key: apiKey
+    type: secret
+    label: API key
+    description: Only needed for Finnhub.
+  - key: refresh
+    type: number
+    label: Refresh every (seconds)
+    default: 15
+    min: 5
+    max: 3600
+providers:
+  - name: quotes
+    intervalSetting: refresh
+release:
+  notes: First release.

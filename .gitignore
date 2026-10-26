@@ -1,0 +1,4 @@
+# dwb output
+/gen/
+/dist/
+/.flatpak-builder/

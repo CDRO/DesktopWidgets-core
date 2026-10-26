@@ -1,0 +1,14 @@
+main {
+  display: grid;
+  place-content: center;
+  text-align: center;
+}
+h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+}
+p {
+  margin: 4px 0 0;
+  color: var(--dw-fg-muted);
+}

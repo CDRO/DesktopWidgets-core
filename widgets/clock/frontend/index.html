@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Clock</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="/wails/runtime.js"></script>
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main class="dw-card">
+      <svg id="analog" viewBox="-100 -100 200 200" aria-hidden="true">
+        <circle class="face" r="96" />
+        <g id="ticks"></g>
+        <line id="hour" class="hand hour" y2="-48" />
+        <line id="minute" class="hand minute" y2="-72" />
+        <line id="second" class="hand second" y1="14" y2="-80" />
+        <circle class="pin" r="4" />
+      </svg>
+      <div id="digital">
+        <div id="time"></div>
+      </div>
+      <div id="date"></div>
+    </main>
+  </body>
+</html>

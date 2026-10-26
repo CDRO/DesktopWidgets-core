@@ -1,0 +1,31 @@
+id: clock
+name: Clock
+description: Analog or digital clock with date, optional seconds and time zone.
+version: 1.0.0
+category: time
+window:
+  width: 220
+  height: 220
+  transparent: true
+  layer: bottom
+  position: top-right
+settings:
+  - key: style
+    type: enum
+    label: Style
+    options: [analog, digital]
+    default: analog
+  - key: format24h
+    type: bool
+    label: 24-hour format
+    default: true
+  - key: showSeconds
+    type: bool
+    label: Show seconds
+    default: true
+  - key: timeZone
+    type: string
+    label: Time zone
+    description: IANA name such as Europe/Zurich. Leave empty for local time.
+release:
+  notes: First release.

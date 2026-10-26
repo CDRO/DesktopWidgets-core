@@ -1,0 +1,68 @@
+/* Base styles injected by /dw/dw.js into every widget page. */
+:root {
+  color-scheme: light dark;
+  --dw-fg: #f4f4f5;
+  --dw-fg-muted: #a1a1aa;
+  --dw-bg: rgba(24, 24, 27, 0.72);
+  --dw-accent: #60a5fa;
+  --dw-up: #4ade80;
+  --dw-down: #f87171;
+  --dw-radius: 14px;
+  --dw-font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: var(--dw-fg);
+  font-family: var(--dw-font);
+  user-select: none;
+  -webkit-user-select: none;
+  /* the whole widget is draggable and carries the runtime context menu */
+  --wails-draggable: drag;
+  --custom-contextmenu: dw-menu;
+}
+
+html.dw-locked body {
+  --wails-draggable: no-drag;
+}
+
+/* Use on interactive elements so clicks don't start a window drag. */
+.dw-no-drag,
+button,
+input,
+select,
+a {
+  --wails-draggable: no-drag;
+}
+
+/* Convenience container: a rounded translucent card filling the window. */
+.dw-card {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 12px 16px;
+  border-radius: var(--dw-radius);
+  background: var(--dw-bg);
+  backdrop-filter: blur(12px);
+}
+
+.dw-update-badge {
+  position: fixed;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dw-accent);
+  color: #fff;
+  font: 700 12px/20px var(--dw-font);
+  cursor: pointer;
+}
+.dw-update-badge.dw-critical {
+  background: var(--dw-down);
+}

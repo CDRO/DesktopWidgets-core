@@ -1,0 +1,13 @@
+id: library
+kind: app
+name: Widget Library
+description: Browse, install and update DesktopWidgets. Optional; every widget also installs on its own.
+version: 1.0.0
+category: system
+window:
+  width: 820
+  height: 600
+  resizable: true
+  position: center
+release:
+  notes: First release.

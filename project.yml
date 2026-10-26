@@ -1,0 +1,8 @@
+# Project identity and release destination, read by tools/dwb.
+name: DesktopWidgets
+appIdPrefix: io.github.cdro.desktopwidgets
+releaseRepo: cdro/DesktopWidgets
+vendor: Tizian Schmidlin
+maintainer: Tizian Schmidlin
+homepage: https://github.com/cdro/DesktopWidgets
+license: MIT
