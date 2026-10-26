@@ -182,7 +182,9 @@ func compile(r *repo, u *unit, t *project.Target, work string) (string, error) {
 		env = append(env, "CGO_ENABLED=1")
 	}
 	bin := filepath.Join(work, "bin", name)
-	cmd := exec.Command("go", "build", "-trimpath", "-tags", strings.Join(tags, ","),
+	// -buildvcs=false: CI containers check out the repo as another user,
+	// which git rejects ("dubious ownership"), failing VCS stamping.
+	cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-tags", strings.Join(tags, ","),
 		"-ldflags", ldflags, "-o", bin, "./gen/"+u.M.ID)
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = r.Root, env, os.Stdout, os.Stderr
 	return bin, cmd.Run()
