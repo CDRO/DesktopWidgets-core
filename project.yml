@@ -3,6 +3,6 @@ name: DesktopWidgets
 appIdPrefix: io.github.cdro.desktopwidgets
 releaseRepo: cdro/DesktopWidgets
 vendor: Tizian Schmidlin
-maintainer: Tizian Schmidlin
+maintainer: Tizian Schmidlin <tizian.schmidlin@gmail.com>
 homepage: https://github.com/cdro/DesktopWidgets
 license: MIT
