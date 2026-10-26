@@ -9,8 +9,9 @@ permissions:
   contents: read
 
 env:
-  # check runs in the Ubuntu 24.04 build image; build in the tarball image.
-  CI_TARGETS: ubuntu-24.04-amd64,linux-amd64
+  # check runs in the Ubuntu 24.04 build image, build in the tarball image,
+  # flatpak in the Flatpak image.
+  CI_TARGETS: ubuntu-24.04-amd64,linux-amd64,flatpak-amd64
 
 jobs:
   images-plan:
@@ -92,3 +93,24 @@ jobs:
           key: ci-build
       - run: go run ./tools/dwb build --target linux-amd64 --out dist
       - run: go run ./tools/dwb build --target windows-amd64 --formats zip --out dist
+
+  # Packages one widget as a Flatpak, so the Flatpak path is tested before a
+  # release. Shares its Go cache key with the release's flatpak target.
+  flatpak:
+    needs: [images-plan, images, check]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ${{ fromJSON(needs.images-plan.outputs.image_map)['flatpak-amd64'] }}
+      options: --privileged
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go-cached
+        with:
+          key: flatpak-amd64
+      - run: go run ./tools/dwb build --target flatpak-amd64 --widgets clock --out dist

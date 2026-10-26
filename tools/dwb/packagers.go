@@ -184,7 +184,13 @@ func packageNfpm(c *pkgCtx) error {
 	return pkgr.Package(info, f)
 }
 
-// ---- flatpak (compiled inside the GNOME SDK sandbox) ----
+// ---- flatpak ----
+//
+// The binary is compiled with `flatpak build` against the GNOME SDK (plus
+// its Go extension) but with the host filesystem visible, so it uses the
+// host's Go module and build caches, which CI restores per target.
+// flatpak-builder then only packages the prebuilt binary, which needs no
+// network and takes seconds.
 
 const flathubRepo = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
@@ -205,75 +211,114 @@ func packageFlatpak(c *pkgCtx) error {
 	if err := copyFile(c.icon(), filepath.Join(dir, id+".png")); err != nil {
 		return err
 	}
-	build := "/run/build/" + bin
-	manifest := map[string]any{
-		"id":              id,
-		"runtime":         fp.Runtime,
-		"runtime-version": fp.RuntimeVersion,
-		"sdk":             fp.SDK,
-		"sdk-extensions":  []string{fp.GoExtension},
-		"command":         bin,
-		// X11 only for now (see runtime/layer_linux.go).
-		"finish-args": []string{"--share=ipc", "--socket=x11", "--share=network", "--device=dri"},
-		"modules": []any{map[string]any{
-			"name":        bin,
-			"buildsystem": "simple",
-			"build-options": map[string]any{
-				"append-path": "/usr/lib/sdk/golang/bin",
-				"build-args":  []string{"--share=network"}, // GOTOOLCHAIN download
-				"env": map[string]string{
-					"GOTOOLCHAIN": "auto", "GOFLAGS": "-mod=vendor", "CGO_ENABLED": "1",
-					"GOPATH": build + "/.gopath", "GOCACHE": build + "/.gocache",
-				},
-			},
-			"build-commands": []string{
-				"go build -trimpath -tags gtk3,production -ldflags='-s -w' -o /app/bin/" + bin + " ./gen/" + c.u.M.ID,
-				"install -Dm644 " + id + ".desktop /app/share/applications/" + id + ".desktop",
-				"install -Dm644 " + id + ".png /app/share/icons/hicolor/256x256/apps/" + id + ".png",
-			},
-			"sources": []any{
-				map[string]any{"type": "dir", "path": c.r.Root, "skip": []string{".git", "dist", ".flatpak-builder", "library/node_modules"}},
-				map[string]any{"type": "file", "path": filepath.Join(dir, id+".desktop")},
-				map[string]any{"type": "file", "path": filepath.Join(dir, id+".png")},
-			},
-		}},
-	}
-	mpath := filepath.Join(dir, id+".json")
-	data, _ := json.MarshalIndent(manifest, "", "  ")
-	if err := os.WriteFile(mpath, data, 0o644); err != nil {
-		return err
-	}
-	repoDir := filepath.Join(dir, "repo")
-	// Modules come from the host's (CI-cached) module cache via vendor/, so
-	// the sandbox does not download them for every widget.
-	vendor := exec.Command("go", "mod", "vendor")
-	vendor.Dir, vendor.Stdout, vendor.Stderr = c.r.Root, os.Stdout, os.Stderr
-	if err := vendor.Run(); err != nil {
-		return fmt.Errorf("go mod vendor: %w", err)
-	}
-	defer os.RemoveAll(filepath.Join(c.r.Root, "vendor"))
-
 	// As root (the CI build image) use the system installation, where the
 	// runtime and SDK are preinstalled; otherwise the user's.
 	scope := "--user"
 	if os.Geteuid() == 0 {
 		scope = "--system"
 	}
-	steps := [][]string{
-		{"flatpak", "remote-add", scope, "--if-not-exists", "flathub", flathubRepo},
-		{"flatpak-builder", scope, "--install-deps-from=flathub", "--force-clean", "--disable-rofiles-fuse",
-			"--state-dir=" + filepath.Join(c.out, ".work", ".flatpak-builder"),
-			"--repo=" + repoDir, filepath.Join(dir, "build"), mpath},
-		{"flatpak", "build-bundle", "--runtime-repo=" + flathubRepo, repoDir, c.file(), id},
-	}
-	for _, s := range steps {
-		cmd := exec.Command(s[0], s[1:]...)
+	run := func(args ...string) error {
+		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir, cmd.Stdout, cmd.Stderr = c.r.Root, os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s: %w", strings.Join(s[:2], " "), err)
+			return fmt.Errorf("%s: %w", strings.Join(args[:2], " "), err)
 		}
+		return nil
 	}
-	return nil
+
+	// Install the SDK and Go extension if missing (no-op in the CI image).
+	deps := map[string]any{
+		"id": id, "runtime": fp.Runtime, "runtime-version": fp.RuntimeVersion, "sdk": fp.SDK,
+		"sdk-extensions": []string{fp.GoExtension}, "modules": []any{},
+	}
+	depsPath := filepath.Join(dir, "deps.json")
+	if err := writeJSON(depsPath, deps); err != nil {
+		return err
+	}
+	stateDir := "--state-dir=" + filepath.Join(c.out, ".work", ".flatpak-builder")
+	if err := run("flatpak", "remote-add", scope, "--if-not-exists", "flathub", flathubRepo); err != nil {
+		return err
+	}
+	if err := run("flatpak-builder", scope, "--install-deps-from=flathub", "--install-deps-only", stateDir,
+		filepath.Join(dir, "deps-build"), depsPath); err != nil {
+		return err
+	}
+
+	binPath, err := compileInSDK(c, dir, run)
+	if err != nil {
+		return err
+	}
+
+	manifest := map[string]any{
+		"id":              id,
+		"runtime":         fp.Runtime,
+		"runtime-version": fp.RuntimeVersion,
+		"sdk":             fp.SDK,
+		"command":         bin,
+		// X11 only for now (see runtime/layer_linux.go).
+		"finish-args": []string{"--share=ipc", "--socket=x11", "--share=network", "--device=dri"},
+		"modules": []any{map[string]any{
+			"name":        bin,
+			"buildsystem": "simple",
+			"build-commands": []string{
+				"install -Dm755 " + bin + " /app/bin/" + bin,
+				"install -Dm644 " + id + ".desktop /app/share/applications/" + id + ".desktop",
+				"install -Dm644 " + id + ".png /app/share/icons/hicolor/256x256/apps/" + id + ".png",
+			},
+			"sources": []any{
+				map[string]any{"type": "file", "path": binPath},
+				map[string]any{"type": "file", "path": filepath.Join(dir, id+".desktop")},
+				map[string]any{"type": "file", "path": filepath.Join(dir, id+".png")},
+			},
+		}},
+	}
+	mpath := filepath.Join(dir, id+".json")
+	if err := writeJSON(mpath, manifest); err != nil {
+		return err
+	}
+	repoDir := filepath.Join(dir, "repo")
+	if err := run("flatpak-builder", scope, "--force-clean", "--disable-rofiles-fuse", stateDir,
+		"--repo="+repoDir, filepath.Join(dir, "build"), mpath); err != nil {
+		return err
+	}
+	return run("flatpak", "build-bundle", "--runtime-repo="+flathubRepo, repoDir, c.file(), id)
+}
+
+// compileInSDK builds gen/<id> inside the SDK sandbox, against the SDK's
+// GTK/WebKitGTK, with the host's Go caches and output dir mounted.
+func compileInSDK(c *pkgCtx, dir string, run func(...string) error) (string, error) {
+	fp := c.t.Flatpak
+	goenv, err := exec.Command("go", "env", "GOCACHE", "GOMODCACHE", "GOPATH").Output()
+	if err != nil {
+		return "", fmt.Errorf("go env: %w", err)
+	}
+	paths := strings.Fields(string(goenv))
+	if len(paths) != 3 {
+		return "", fmt.Errorf("go env: unexpected output %q", goenv)
+	}
+	sdkDir := filepath.Join(dir, "sdk")
+	os.RemoveAll(sdkDir)
+	if err := run("flatpak", "build-init", "--sdk-extension="+fp.GoExtension, sdkDir,
+		c.appID(), fp.SDK, fp.Runtime, fp.RuntimeVersion); err != nil {
+		return "", err
+	}
+	out := filepath.Join(c.work, "bin", c.u.M.Binary())
+	err = run("flatpak", "build", "--share=network", "--filesystem=host", "--build-dir="+c.r.Root,
+		"--env=PATH=/usr/lib/sdk/golang/bin:/usr/bin:/bin",
+		"--env=GOCACHE="+paths[0], "--env=GOMODCACHE="+paths[1], "--env=GOPATH="+paths[2],
+		"--env=GOTOOLCHAIN=auto", "--env=CGO_ENABLED=1", "--env=GOFLAGS=",
+		sdkDir,
+		"go", "build", "-trimpath", "-buildvcs=false", "-tags", "gtk3,production",
+		"-ldflags", "-s -w", "-o", out, "./gen/"+c.u.M.ID)
+	return out, err
+}
+
+func writeJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // ---- msi via WiX (Windows runners only) ----

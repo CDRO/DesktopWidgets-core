@@ -31,8 +31,10 @@ targets:
   `dotnet tool update`).
 - **Go.** `.github/actions/setup-go-cached` keeps the module and build caches
   per target, refreshed after every run.
-- **Flatpak.** Modules are vendored on the host before the sandboxed build,
-  so the sandbox doesn't download them.
+- **Flatpak.** The binary is compiled with `flatpak build` against the GNOME
+  SDK, with the host filesystem visible, so it uses the cached Go modules and
+  build cache like the other targets. `flatpak-builder` then only packages
+  the prebuilt binary.
 
 ## Matrices
 
