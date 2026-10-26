@@ -1,0 +1,121 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --fg: #18181b;
+  --muted: #6b7280;
+  --border: #e4e4e7;
+  --accent: #2563eb;
+  --warn: #dc2626;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111113;
+    --card: #1c1c1f;
+    --fg: #f4f4f5;
+    --muted: #a1a1aa;
+    --border: #2e2e33;
+  }
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 20px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+h1 {
+  font-size: 18px;
+  margin: 0 auto 0 0;
+}
+input[type="search"] {
+  width: 240px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+}
+#status {
+  margin: 12px 20px 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+#status.error {
+  color: var(--warn);
+}
+#grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+  padding: 16px 20px 24px;
+}
+.card {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.card.focus {
+  outline: 2px solid var(--accent);
+}
+.icon {
+  border-radius: 12px;
+}
+h2 {
+  font-size: 15px;
+  margin: 0;
+}
+.desc {
+  margin: 2px 0;
+  color: var(--muted);
+}
+.meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.meta .update {
+  color: var(--accent);
+  font-weight: 600;
+}
+.meta .critical {
+  color: var(--warn);
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

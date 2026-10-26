@@ -1,0 +1,75 @@
+main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+main.analog {
+  border-radius: 50%;
+}
+#analog {
+  position: relative;
+  z-index: 1; /* hands above the date */
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+.face {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 2;
+}
+#ticks line {
+  stroke: var(--dw-fg-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+#ticks line.major {
+  stroke: var(--dw-fg);
+  stroke-width: 4;
+}
+.hand {
+  stroke: var(--dw-fg);
+  stroke-linecap: round;
+}
+.hour {
+  stroke-width: 7;
+}
+.minute {
+  stroke-width: 4.5;
+}
+.second {
+  stroke: var(--dw-accent);
+  stroke-width: 2;
+  transition: transform 0.25s cubic-bezier(0.4, 2.3, 0.6, 1);
+}
+.second.no-anim {
+  transition: none;
+}
+.pin {
+  fill: var(--dw-accent);
+}
+#digital {
+  display: none;
+  font-size: 44px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+}
+main.digital #analog {
+  display: none;
+}
+main.digital #digital {
+  display: block;
+}
+#date {
+  font-size: 13px;
+  color: var(--dw-fg-muted);
+}
+main.analog #date {
+  position: absolute;
+  top: 64%;
+  z-index: 0;
+}

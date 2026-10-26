@@ -1,0 +1,184 @@
+# Release trigger: a push to main that changes VERSION (the workflow then
+# creates the tag vVERSION itself), or a manually pushed v* tag.
+# Builds every widget whose version changed for every target in
+# platforms.yml and publishes to the release repository under the same tag.
+# Needs the RELEASE_TOKEN secret (see docs/releasing.md).
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      all:
+        description: Rebuild every widget, not only those with a new version
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPO: cdro/DesktopWidgets
+
+jobs:
+  # Resolves the release tag. On main it is "v" + VERSION; the tag is created
+  # here if it does not exist yet. A push to main whose tag already exists
+  # (VERSION not bumped) releases nothing; a manual run re-publishes it.
+  tag:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      release: ${{ steps.tag.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Run releases from main or a v* tag." && exit 1
+          fi
+          version=$(tr -d '[:space:]' < VERSION)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error file=VERSION::'$version' is not X.Y.Z or X.Y.Z-suffix" && exit 1
+          fi
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              echo "Re-publishing existing tag $tag"
+              echo "release=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Tag $tag already exists; bump VERSION to release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release $tag"
+          git push origin "refs/tags/$tag"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+  plan:
+    needs: tag
+    if: needs.tag.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      widgets: ${{ steps.plan.outputs.widgets }}
+      has_builds: ${{ steps.plan.outputs.has_builds }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - id: plan
+        run: >-
+          go run ./tools/dwb plan --github-output
+          --previous "https://github.com/$RELEASE_REPO/releases/latest/download/catalog.json"
+          ${{ inputs.all && '--all' || '' }}
+
+  build:
+    needs: [tag, plan]
+    if: needs.plan.outputs.has_builds == 'true'
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    steps:
+      - name: Prepare build environment
+        if: matrix.setup != ''
+        shell: bash
+        run: ${{ matrix.setup }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build and package
+        shell: bash
+        run: go run ./tools/dwb build --target "${{ matrix.target }}" --widgets "${{ matrix.widgets }}" --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            dist/build-*.json
+            dist/dw-*
+          if-no-files-found: error
+
+  publish:
+    needs: [tag, plan, build]
+    if: always() && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Catalog, checksums, notes
+        run: |
+          mkdir -p dist
+          go run ./tools/dwb catalog --tag "$TAG" --dist dist \
+            --previous "https://github.com/$RELEASE_REPO/releases/latest/download/catalog.json"
+          cd dist && sha256sum dw-* catalog.json > SHA256SUMS 2>/dev/null || sha256sum catalog.json > SHA256SUMS
+      - name: Tag the release repository
+        env:
+          TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          test -n "$TOKEN" || { echo "::error::RELEASE_TOKEN secret is not set"; exit 1; }
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${RELEASE_REPO}.git" release
+          cp dist/catalog.json release/catalog.json
+          go run ./tools/dwb readme --catalog dist/catalog.json --out release/README.md
+          cd release
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md catalog.json
+          git diff --cached --quiet || git commit -m "Release $TAG"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists in $RELEASE_REPO"
+          else
+            git tag -a "$TAG" -m "Release $TAG (core ${GITHUB_SHA::12})"
+            git push origin HEAD "refs/tags/$TAG"
+          fi
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(dist/dw-* dist/catalog.json dist/SHA256SUMS)
+          flags=()
+          [[ "$TAG" == *-* ]] && flags+=(--prerelease --latest=false)
+          if gh release view "$TAG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$RELEASE_REPO" --clobber "${files[@]}"
+          else
+            gh release create "$TAG" --repo "$RELEASE_REPO" --verify-tag --title "$TAG" \
+              --notes-file dist/RELEASE_NOTES.md "${flags[@]}" "${files[@]}"
+          fi

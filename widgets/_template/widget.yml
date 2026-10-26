@@ -1,0 +1,26 @@
+# Widget manifest. See docs/widgets.md for every field.
+id: __ID__
+name: __NAME__
+description: Describe what __NAME__ shows.
+# Start at 1.0.0. Bump the major version for new features; minor/patch only
+# for small fixes (those don't prompt users to update).
+version: 1.0.0
+category: misc
+window:
+  width: 260
+  height: 140
+  transparent: true
+  layer: bottom # bottom | normal | top
+  position: top-right # top-left | top-right | bottom-left | bottom-right | center
+settings:
+  - key: name
+    type: string
+    label: Your name
+    default: World
+# Go data sources in *.go next to this file. Delete this block (and
+# widget.go) for a frontend-only widget.
+providers:
+  - name: greeting
+    interval: 30s
+release:
+  notes: First release.

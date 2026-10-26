@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-dw-plain>
+  <head>
+    <meta charset="utf-8" />
+    <title>Widget Library</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="/wails/runtime.js"></script>
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Widget Library</h1>
+      <input id="search" type="search" placeholder="Search widgets" aria-label="Search widgets" />
+      <button id="reload" title="Reload catalog">Reload</button>
+    </header>
+    <p id="status" role="status">Loading catalog…</p>
+    <section id="grid"></section>
+    <template id="card">
+      <article class="card">
+        <img class="icon" alt="" width="56" height="56" />
+        <div class="body">
+          <h2></h2>
+          <p class="desc"></p>
+          <p class="meta"></p>
+        </div>
+        <div class="actions">
+          <button class="primary"></button>
+          <button class="open">Open</button>
+        </div>
+      </article>
+    </template>
+  </body>
+</html>

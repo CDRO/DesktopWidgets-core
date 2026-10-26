@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install GTK/WebKitGTK headers
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: VERSION is X.Y.Z or X.Y.Z-suffix
+        run: grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' VERSION
+      - name: Validate manifests and build matrix
+        run: go run ./tools/dwb validate && go run ./tools/dwb targets
+      - name: gofmt
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))" || { gofmt -l $(git ls-files '*.go'); exit 1; }
+      - name: Vet (linux + windows)
+        run: |
+          go vet -tags gtk3 ./...
+          GOOS=windows go vet ./...
+      - name: Test
+        run: go test -tags gtk3 ./...
+      - name: Changed widgets bump their version
+        if: github.event_name == 'pull_request'
+        run: go run ./tools/dwb check-versions --base origin/${{ github.base_ref }}
+
+  # Compiles and packages every unit for one Linux and the Windows target so
+  # packaging problems show up before a release tag.
+  build:
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - run: go run ./tools/dwb build --target linux-amd64 --out dist
+      - run: go run ./tools/dwb build --target windows-amd64 --formats zip --out dist

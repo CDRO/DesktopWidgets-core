@@ -1,0 +1,18 @@
+#!/bin/sh
+# Installs {{.Name}} for the current user (~/.local). Run with --uninstall to remove.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+bin="${XDG_BIN_HOME:-$HOME/.local/bin}"
+data="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+if [ "${1:-}" = "--uninstall" ]; then
+  rm -f "$bin/{{.Binary}}" "$data/applications/{{.AppID}}.desktop" "$data/icons/hicolor/256x256/apps/{{.AppID}}.png"
+  echo "{{.Name}} removed."
+  exit 0
+fi
+
+install -Dm755 "$here/{{.Binary}}" "$bin/{{.Binary}}"
+install -Dm644 "$here/{{.AppID}}.png" "$data/icons/hicolor/256x256/apps/{{.AppID}}.png"
+mkdir -p "$data/applications"
+sed "s|^Exec=.*|Exec=$bin/{{.Binary}}|" "$here/{{.AppID}}.desktop" > "$data/applications/{{.AppID}}.desktop"
+echo "{{.Name}} installed. Start it from your application menu or run $bin/{{.Binary}}"
