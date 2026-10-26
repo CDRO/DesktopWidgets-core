@@ -1,10 +1,14 @@
-# Tag push (vX.Y.Z) on core -> build every widget whose version changed for
-# every target in platforms.yml -> publish to the release repository under
-# the same tag. Needs the RELEASE_TOKEN secret (see docs/releasing.md).
+# Release trigger: a push to main that changes VERSION (the workflow then
+# creates the tag vVERSION itself), or a manually pushed v* tag.
+# Builds every widget whose version changed for every target in
+# platforms.yml and publishes to the release repository under the same tag.
+# Needs the RELEASE_TOKEN secret (see docs/releasing.md).
 name: Release
 
 on:
   push:
+    branches: [main]
+    paths: [VERSION]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -22,20 +26,64 @@ concurrency:
 
 env:
   RELEASE_REPO: cdro/DesktopWidgets
-  TAG: ${{ github.ref_name }}
 
 jobs:
+  # Resolves the release tag. On main it is "v" + VERSION; the tag is created
+  # here if it does not exist yet. A push to main whose tag already exists
+  # (VERSION not bumped) releases nothing; a manual run re-publishes it.
+  tag:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      release: ${{ steps.tag.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Run releases from main or a v* tag." && exit 1
+          fi
+          version=$(tr -d '[:space:]' < VERSION)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error file=VERSION::'$version' is not X.Y.Z or X.Y.Z-suffix" && exit 1
+          fi
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              echo "Re-publishing existing tag $tag"
+              echo "release=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Tag $tag already exists; bump VERSION to release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release $tag"
+          git push origin "refs/tags/$tag"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
   plan:
+    needs: tag
+    if: needs.tag.outputs.release == 'true'
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       widgets: ${{ steps.plan.outputs.widgets }}
       has_builds: ${{ steps.plan.outputs.has_builds }}
     steps:
-      - name: Require a version tag
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        run: echo "::error::Run this workflow on a vX.Y.Z tag." && exit 1
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -46,7 +94,7 @@ jobs:
           ${{ inputs.all && '--all' || '' }}
 
   build:
-    needs: plan
+    needs: [tag, plan]
     if: needs.plan.outputs.has_builds == 'true'
     name: build (${{ matrix.target }})
     strategy:
@@ -60,6 +108,8 @@ jobs:
         shell: bash
         run: ${{ matrix.setup }}
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -76,11 +126,15 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [plan, build]
+    needs: [tag, plan, build]
     if: always() && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

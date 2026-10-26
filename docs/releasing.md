@@ -16,10 +16,10 @@ The release workflow in this repository pushes to the release repository
 
 ## Cutting a release
 
-```sh
-git tag v1.2.0
-git push origin v1.2.0
-```
+Bump the project version in `VERSION` (e.g. `1.2.0`) and merge that to
+`main`. The release workflow creates the tag `v1.2.0` in this repository and
+runs the release in the same run. A push to `main` that doesn't change
+`VERSION` releases nothing. Pushing a `v*` tag by hand works too.
 
 The tag versions the project. It is mirrored as the same tag in the release
 repository. Tags with a suffix, such as `v1.3.0-rc1`, are published as
@@ -36,9 +36,9 @@ What gets built:
 - If nothing changed, the release still happens: the tag is mirrored and the
   catalog is re-published.
 
-To rebuild everything, for example after a runtime security fix, run the
-*Release* workflow manually on the tag with **Rebuild every widget** checked.
-Users only get the fix as an update if the versions were bumped, so prefer
+To re-publish the current `VERSION`, run the *Release* workflow manually on
+`main`. To rebuild every widget, for example after a runtime security fix,
+also check **Rebuild every widget**. Users only get the fix as an update if the versions were bumped, so prefer
 bumping the affected widgets (with `release.critical: true` for security
 fixes).
 

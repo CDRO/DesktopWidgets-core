@@ -47,7 +47,9 @@ Linux builds always use the `gtk3` build tag. `dwb` sets it for you; pass
 
 1. Change a widget and bump its `version` in `widget.yml`. CI fails a PR that
    changes a widget without bumping it.
-2. Push a tag such as `v1.4.0` on this repository.
+2. Bump `VERSION` (e.g. to `1.4.0`) and merge to `main`. The release
+   workflow creates the tag `v1.4.0` itself; pushing a `v*` tag by hand also
+   works.
 3. `release.yml` compares each widget's version with the latest published
    `catalog.json`. Only widgets with a new version are built, for every target
    in `platforms.yml`.
