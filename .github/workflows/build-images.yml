@@ -1,0 +1,55 @@
+# Builds the prebuilt build images for container targets (base image +
+# the target's setup from platforms.yml) and pushes them to GHCR. An image
+# is only built when its tag (which hashes base + setup) does not exist
+# yet, so normally every entry finishes in seconds.
+name: Build images
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: JSON {"include":[{target, base, setup, image}]} from `dwb plan` or `dwb images`
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: image (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.images) }}
+    steps:
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Check for an existing image
+        id: exists
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$IMAGE is up to date"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push
+        if: steps.exists.outputs.found != 'true'
+        env:
+          BASE: ${{ matrix.base }}
+          SETUP: ${{ matrix.setup }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          mkdir ctx && printf '%s\n' "$SETUP" > ctx/setup.sh
+          cat > ctx/Dockerfile <<DOCKERFILE
+          FROM $BASE
+          LABEL org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          COPY setup.sh /tmp/setup.sh
+          RUN bash -e /tmp/setup.sh && rm /tmp/setup.sh
+          DOCKERFILE
+          docker build -t "$IMAGE" ctx
+          docker push "$IMAGE"

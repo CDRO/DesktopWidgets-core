@@ -8,23 +8,59 @@ on:
 permissions:
   contents: read
 
+env:
+  # check runs in the Ubuntu 24.04 build image; build in the tarball image.
+  CI_TARGETS: ubuntu-24.04-amd64,linux-amd64
+
 jobs:
-  check:
+  images-plan:
     runs-on: ubuntu-24.04
+    outputs:
+      images: ${{ steps.images.outputs.images }}
+      image_map: ${{ steps.images.outputs.image_map }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Install GTK/WebKitGTK headers
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - id: images
+        run: go run ./tools/dwb images --github-output --registry "ghcr.io/${GITHUB_REPOSITORY}/build" --targets "$CI_TARGETS"
+
+  images:
+    needs: images-plan
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-images.yml
+    with:
+      images: ${{ needs.images-plan.outputs.images }}
+
+  check:
+    needs: [images-plan, images]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ${{ fromJSON(needs.images-plan.outputs.image_map)['ubuntu-24.04-amd64'] }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Trust the checkout (owned by another user in the container)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/setup-go-cached
+        with:
+          key: ci-check
       - name: VERSION is X.Y.Z or X.Y.Z-suffix
         run: grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' VERSION
       - name: Validate manifests and build matrix
         run: go run ./tools/dwb validate && go run ./tools/dwb targets
       - name: gofmt
+        shell: bash
         run: test -z "$(gofmt -l $(git ls-files '*.go'))" || { gofmt -l $(git ls-files '*.go'); exit 1; }
       - name: Vet (linux + windows)
         run: |
@@ -36,16 +72,23 @@ jobs:
         if: github.event_name == 'pull_request'
         run: go run ./tools/dwb check-versions --base origin/${{ github.base_ref }}
 
-  # Compiles and packages every unit for one Linux and the Windows target so
-  # packaging problems show up before a release tag.
+  # Compiles and packages every unit for the Linux tarball and the Windows
+  # zip so packaging problems show up before a release.
   build:
-    needs: check
+    needs: [images-plan, images, check]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ${{ fromJSON(needs.images-plan.outputs.image_map)['linux-amd64'] }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go-cached
         with:
-          go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          key: ci-build
       - run: go run ./tools/dwb build --target linux-amd64 --out dist
       - run: go run ./tools/dwb build --target windows-amd64 --formats zip --out dist

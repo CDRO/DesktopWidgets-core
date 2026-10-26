@@ -220,9 +220,9 @@ func packageFlatpak(c *pkgCtx) error {
 			"buildsystem": "simple",
 			"build-options": map[string]any{
 				"append-path": "/usr/lib/sdk/golang/bin",
-				"build-args":  []string{"--share=network"}, // go module download
+				"build-args":  []string{"--share=network"}, // GOTOOLCHAIN download
 				"env": map[string]string{
-					"GOTOOLCHAIN": "auto", "GOFLAGS": "-modcacherw", "CGO_ENABLED": "1",
+					"GOTOOLCHAIN": "auto", "GOFLAGS": "-mod=vendor", "CGO_ENABLED": "1",
 					"GOPATH": build + "/.gopath", "GOCACHE": build + "/.gocache",
 				},
 			},
@@ -244,9 +244,24 @@ func packageFlatpak(c *pkgCtx) error {
 		return err
 	}
 	repoDir := filepath.Join(dir, "repo")
+	// Modules come from the host's (CI-cached) module cache via vendor/, so
+	// the sandbox does not download them for every widget.
+	vendor := exec.Command("go", "mod", "vendor")
+	vendor.Dir, vendor.Stdout, vendor.Stderr = c.r.Root, os.Stdout, os.Stderr
+	if err := vendor.Run(); err != nil {
+		return fmt.Errorf("go mod vendor: %w", err)
+	}
+	defer os.RemoveAll(filepath.Join(c.r.Root, "vendor"))
+
+	// As root (the CI build image) use the system installation, where the
+	// runtime and SDK are preinstalled; otherwise the user's.
+	scope := "--user"
+	if os.Geteuid() == 0 {
+		scope = "--system"
+	}
 	steps := [][]string{
-		{"flatpak", "remote-add", "--user", "--if-not-exists", "flathub", flathubRepo},
-		{"flatpak-builder", "--user", "--install-deps-from=flathub", "--force-clean", "--disable-rofiles-fuse",
+		{"flatpak", "remote-add", scope, "--if-not-exists", "flathub", flathubRepo},
+		{"flatpak-builder", scope, "--install-deps-from=flathub", "--force-clean", "--disable-rofiles-fuse",
 			"--state-dir=" + filepath.Join(c.out, ".work", ".flatpak-builder"),
 			"--repo=" + repoDir, filepath.Join(dir, "build"), mpath},
 		{"flatpak", "build-bundle", "--runtime-repo=" + flathubRepo, repoDir, c.file(), id},
@@ -295,7 +310,9 @@ func packageMSI(c *pkgCtx) error {
 		return err
 	}
 	arch := map[string]string{"amd64": "x64", "arm64": "arm64"}[c.t.Arch]
-	cmd := exec.Command("wix", "build", "-arch", arch, "-o", c.file(), wxsPath)
+	// -pdb keeps the debug symbols file out of the release directory.
+	pdb := filepath.Join(c.work, c.u.M.Binary()+".wixpdb")
+	cmd := exec.Command("wix", "build", "-arch", arch, "-pdb", pdb, "-o", c.file(), wxsPath)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("wix build (is the WiX toolset installed? see platforms.yml setup): %w", err)

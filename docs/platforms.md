@@ -9,11 +9,30 @@ targets:
     os: windows                # windows | linux
     arch: amd64                # amd64 | arm64 (use a matching runner, no cross-compiling with cgo)
     runner: windows-latest     # GitHub Actions runner label
-    container: ""              # optional Docker image the job runs in
-    setup: "..."               # optional shell command to install build deps
+    container: ""              # base image; empty = run on the runner itself
+    options: ""                # extra docker run options, e.g. --privileged
+    setup: "..."               # shell command that installs build deps
+    cache: [...]               # host targets only: paths kept between runs
     formats: [msi, zip]
     depends: [...]             # deb/rpm runtime dependencies
 ```
+
+## Build images and caches
+
+- **Container targets.** `setup` is baked into a prebuilt image,
+  `ghcr.io/<owner>/<repo>/build:<target>-<hash>`, where the hash covers the
+  base image and `setup`. The `build-images` workflow builds an image only
+  when its tag doesn't exist yet. Editing `setup` or the base image therefore
+  rebuilds that one image once, and every later run reuses it.
+  `go run ./tools/dwb images --registry ghcr.io/<owner>/<repo>/build` lists
+  the image names.
+- **Host targets (Windows).** `setup` runs on every job after the `cache`
+  paths are restored, so it must be idempotent (WiX uses
+  `dotnet tool update`).
+- **Go.** `.github/actions/setup-go-cached` keeps the module and build caches
+  per target, refreshed after every run.
+- **Flatpak.** Modules are vendored on the host before the sandboxed build,
+  so the sandbox doesn't download them.
 
 ## Matrices
 

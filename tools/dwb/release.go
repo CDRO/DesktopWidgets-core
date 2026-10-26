@@ -67,69 +67,6 @@ func changedUnits(r *repo, prev *catalog.Catalog, all bool) ([]*unit, error) {
 	return out, errors.Join(errs...)
 }
 
-type matrixEntry struct {
-	Target    string `json:"target"`
-	Runner    string `json:"runner"`
-	Container string `json:"container"`
-	Setup     string `json:"setup"`
-	Widgets   string `json:"widgets"`
-}
-
-func cmdPlan(args []string) error {
-	fl := flag.NewFlagSet("plan", flag.ExitOnError)
-	previous := fl.String("previous", "", "previous catalog.json (file or URL); empty = first release")
-	all := fl.Bool("all", false, "rebuild every unit regardless of version")
-	ghOut := fl.Bool("github-output", false, "write matrix/widgets/has_builds to $GITHUB_OUTPUT")
-	fl.Parse(args)
-
-	r, err := loadRepo()
-	if err != nil {
-		return err
-	}
-	prev, err := loadPrevious(*previous)
-	if err != nil {
-		return err
-	}
-	units, err := changedUnits(r, prev, *all)
-	if err != nil {
-		return err
-	}
-	var ids []string
-	for _, u := range units {
-		ids = append(ids, u.M.ID)
-	}
-	include := []matrixEntry{}
-	for i := range r.Targets {
-		t := &r.Targets[i]
-		sel, _ := selectUnits(r, t, strings.Join(ids, ","))
-		if len(sel) == 0 {
-			continue
-		}
-		var w []string
-		for _, u := range sel {
-			w = append(w, u.M.ID)
-		}
-		include = append(include, matrixEntry{t.ID, t.Runner, t.Container, t.Setup, strings.Join(w, ",")})
-	}
-	matrix, _ := json.Marshal(map[string]any{"include": include})
-
-	fmt.Fprintf(os.Stderr, "units to release: %v\n", ids)
-	for _, e := range include {
-		fmt.Fprintf(os.Stderr, "  %-22s %s\n", e.Target, e.Widgets)
-	}
-	if !*ghOut {
-		fmt.Println(string(matrix))
-		return nil
-	}
-	f, err := os.OpenFile(os.Getenv("GITHUB_OUTPUT"), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		return fmt.Errorf("GITHUB_OUTPUT: %w", err)
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "matrix=%s\nwidgets=%s\nhas_builds=%t\n", matrix, strings.Join(ids, ","), len(include) > 0)
-	return nil
-}
-
 func cmdCatalog(args []string) error {
 	fl := flag.NewFlagSet("catalog", flag.ExitOnError)
 	tag := fl.String("tag", "", "release tag, e.g. v1.4.0")

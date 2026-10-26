@@ -3,6 +3,8 @@
 package project
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -44,14 +46,23 @@ func (p *Project) AssetURL(tag, file string) string {
 
 // Target is one fully expanded build environment.
 type Target struct {
-	ID        string   `yaml:"id" json:"id"`
-	OS        string   `yaml:"os" json:"os"`     // windows | linux
-	Arch      string   `yaml:"arch" json:"arch"` // amd64 | arm64
-	Distro    string   `yaml:"distro,omitempty" json:"distro,omitempty"`
-	Runner    string   `yaml:"runner" json:"runner"`
-	Container string   `yaml:"container,omitempty" json:"container"`
-	Setup     string   `yaml:"setup,omitempty" json:"setup"`
-	Formats   []string `yaml:"formats" json:"formats"`
+	ID     string `yaml:"id" json:"id"`
+	OS     string `yaml:"os" json:"os"`     // windows | linux
+	Arch   string `yaml:"arch" json:"arch"` // amd64 | arm64
+	Distro string `yaml:"distro,omitempty" json:"distro,omitempty"`
+	Runner string `yaml:"runner" json:"runner"`
+	// Container is the base image. Setup is baked into a prebuilt build
+	// image on top of it (see BuildImage), so jobs don't reinstall deps.
+	Container string `yaml:"container,omitempty" json:"container"`
+	// Options are extra `docker run` options, e.g. --privileged.
+	Options string `yaml:"options,omitempty" json:"options,omitempty"`
+	// Setup installs build dependencies: baked into the image for container
+	// targets, run at job start (after restoring Cache) for host targets.
+	Setup string `yaml:"setup,omitempty" json:"setup"`
+	// Cache lists paths cached between runs of host targets, e.g. tools
+	// installed by Setup. Setup must then be idempotent.
+	Cache   []string `yaml:"cache,omitempty" json:"cache,omitempty"`
+	Formats []string `yaml:"formats" json:"formats"`
 	// Depends lists runtime package dependencies for deb/rpm.
 	Depends []string `yaml:"depends,omitempty" json:"-"`
 	Flatpak *Flatpak `yaml:"flatpak,omitempty" json:"-"`
@@ -180,7 +191,8 @@ func substitute(t Target, vars map[string]string) (Target, error) {
 		})
 	}
 	t.ID, t.OS, t.Arch, t.Distro = sub(t.ID), sub(t.OS), sub(t.Arch), sub(t.Distro)
-	t.Runner, t.Container, t.Setup = sub(t.Runner), sub(t.Container), sub(t.Setup)
+	t.Runner, t.Container, t.Setup, t.Options = sub(t.Runner), sub(t.Container), sub(t.Setup), sub(t.Options)
+	t.Cache = subAll(t.Cache, sub)
 	t.Formats = subAll(t.Formats, sub)
 	t.Depends = subAll(t.Depends, sub)
 	if len(missing) > 0 {
@@ -197,6 +209,22 @@ func subAll(in []string, sub func(string) string) []string {
 	return out
 }
 
+// SetupHash identifies a target's build environment (base image + setup).
+func (t Target) SetupHash() string {
+	h := sha256.Sum256([]byte(t.Container + "\n" + t.Setup))
+	return hex.EncodeToString(h[:])[:12]
+}
+
+// BuildImage is the prebuilt image for a container target:
+// <repository>:<target>-<SetupHash>. Changing the base image or setup
+// yields a new tag, so images never go stale. Host targets return "".
+func (t Target) BuildImage(repository string) string {
+	if t.Container == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s-%s", strings.ToLower(repository), t.ID, t.SetupHash())
+}
+
 func validate(t Target) error {
 	if !targetIDs.MatchString(t.ID) {
 		return fmt.Errorf("target id %q must be lowercase (a-z, 0-9, ., -)", t.ID)
@@ -210,6 +238,9 @@ func validate(t Target) error {
 	}
 	if t.Runner == "" || len(t.Formats) == 0 {
 		return fmt.Errorf("target %q: runner and formats are required", t.ID)
+	}
+	if t.Container != "" && len(t.Cache) > 0 {
+		return fmt.Errorf("target %q: cache is for host targets; container setup is baked into the image", t.ID)
 	}
 	for _, f := range t.Formats {
 		if !allowed[f] {
